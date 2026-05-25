@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Upload, Eye, Droplet, HandMetal, Microscope, Menu, X } from "lucide-react";
+import { Upload, Eye, HandMetal, Microscope, Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
@@ -67,6 +67,7 @@ const Index = () => {
     reader.readAsDataURL(file);
   };
 
+  // 🚀 LOCAL PYTHON SERVER CONNECTIVITY FUNCTION
   const analyzeImage = async () => {
     if (!imagePreview || !selectedPart) return;
 
@@ -74,45 +75,62 @@ const Index = () => {
     setResult(null);
 
     try {
-      const { data, error } = await supabase.functions.invoke("analyze-vitamin-deficiency", {
-        body: {
-          image: imagePreview,
-          bodyPart: selectedPart,
-        },
+      const responseBlob = await fetch(imagePreview);
+      const blob = await responseBlob.blob();
+      
+      const formData = new FormData();
+      formData.append("image", blob, "upload.jpg");
+      formData.append("bodyPart", selectedPart);
+
+      // Aapke Local Server Port 5000 par request jaayegi
+      const res = await fetch("http://127.0.0.1:5000/predict", {
+        method: "POST",
+        body: formData,
       });
 
-      // Check for validation error
-      if (error || data?.error === "invalid_image") {
+      if (!res.ok) {
+        throw new Error("Backend server error");
+      }
+
+      const data = await res.json();
+
+      if (data.success) {
+        const formattedResult: AnalysisResult = {
+          overall_health: data.diagnosis,
+          deficiencies: data.readable_label === "Normal" ? [] : [
+            {
+              vitamin: data.readable_label,
+              description: data.diagnosis,
+              confidence: parseFloat(data.confidence)
+            }
+          ]
+        };
+        
+        setResult(formattedResult);
+
+        // History save karne ke liye
+        if (user) {
+          await supabase.from('analysis_history').insert({
+            user_id: user.id,
+            body_part: selectedPart,
+            image_url: imagePreview.substring(0, 100),
+            analysis_result: formattedResult
+          });
+        }
+
         toast({
-          title: "Invalid Image",
-          description: data?.message || `This image does not appear to be a valid ${selectedPart} image. Please upload a clear image of your ${selectedPart}.`,
-          variant: "destructive",
+          title: "Analysis Complete",
+          description: "Your results are ready",
         });
-        setIsAnalyzing(false);
-        return;
+      } else {
+        throw new Error("Prediction failed");
       }
 
-      setResult(data);
-
-      // Save to analysis history if user is logged in
-      if (user) {
-        await supabase.from('analysis_history').insert({
-          user_id: user.id,
-          body_part: selectedPart,
-          image_url: imagePreview.substring(0, 100), // Store preview of base64
-          analysis_result: data
-        });
-      }
-
-      toast({
-        title: "Analysis Complete",
-        description: "Your results are ready",
-      });
     } catch (error) {
       console.error("Analysis error:", error);
       toast({
         title: "Analysis Failed",
-        description: "Please try again or use a different image",
+        description: "Please check if your Python server is running on port 5000",
         variant: "destructive",
       });
     } finally {
@@ -139,7 +157,6 @@ const Index = () => {
       style={{ backgroundImage: `url(${medicalBg})` }}
     >
       <div className="min-h-screen bg-background/80 backdrop-blur-sm">
-      {/* Navigation */}
       <nav className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container mx-auto px-4">
           <div className="flex h-16 items-center justify-between">
@@ -164,7 +181,6 @@ const Index = () => {
               )}
             </div>
 
-            {/* Mobile menu button */}
             <button
               className="md:hidden"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
@@ -173,7 +189,6 @@ const Index = () => {
             </button>
           </div>
 
-          {/* Mobile menu */}
           {mobileMenuOpen && (
             <div className="md:hidden py-4 space-y-2">
               <Button variant="ghost" className="w-full" onClick={() => { navigate("/"); setMobileMenuOpen(false); }}>Home</Button>
@@ -191,7 +206,6 @@ const Index = () => {
       </nav>
 
       <div className="container mx-auto px-4 py-12">
-        {/* Hero Section */}
         <div className="text-center mb-12">
           <h1 className="text-4xl md:text-5xl font-bold text-foreground mb-4">
             Vitamin Deficiency Detector
@@ -203,7 +217,6 @@ const Index = () => {
 
         {!result ? (
           <>
-            {/* Body Part Selection */}
             {!selectedPart && (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
                 {bodyParts.map((part) => (
@@ -226,7 +239,6 @@ const Index = () => {
               </div>
             )}
 
-            {/* Upload Section */}
             {selectedPart && !imagePreview && (
               <Card className="max-w-2xl mx-auto">
                 <CardHeader>
@@ -258,7 +270,6 @@ const Index = () => {
               </Card>
             )}
 
-            {/* Image Preview & Analysis */}
             {imagePreview && (
               <Card className="max-w-2xl mx-auto">
                 <CardHeader>
@@ -292,34 +303,33 @@ const Index = () => {
             )}
           </>
         ) : (
-          /* Results Section */
           <div className="max-w-4xl mx-auto space-y-6">
             <Card>
               <CardHeader>
                 <CardTitle>Analysis Results</CardTitle>
-                <CardDescription>{result.overall_health}</CardDescription>
+                <CardDescription>Vitamin Deficiency Assessment Report</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
                 {result.deficiencies.length === 0 ? (
-                  <p className="text-center text-muted-foreground py-8">
-                    {result.overall_health}
+                  <p className="text-center text-emerald-600 font-medium py-8 bg-emerald-50 rounded-lg border border-emerald-200">
+                    🎉 {result.overall_health}
                   </p>
                 ) : (
                   result.deficiencies.map((deficiency, index) => (
-                    <Card key={index} className="border-l-4 border-l-primary">
+                    <Card key={index} className="border-l-4 border-l-red-500 bg-red-50/30">
                       <CardHeader>
                         <div className="flex items-center justify-between">
-                          <CardTitle className="text-xl">{deficiency.vitamin}</CardTitle>
+                          <CardTitle className="text-xl text-red-700">{deficiency.vitamin} Detected</CardTitle>
                           {deficiency.confidence && (
-                            <span className="text-sm font-semibold text-primary bg-primary/10 px-3 py-1 rounded-full">
-                              {deficiency.confidence}% confidence
+                            <span className="text-sm font-semibold text-red-700 bg-red-100 px-3 py-1 rounded-full">
+                              {deficiency.confidence}% Match
                             </span>
                           )}
                         </div>
                       </CardHeader>
                       <CardContent>
-                        <p className="text-muted-foreground leading-relaxed">
-                          → {deficiency.description}
+                        <p className="text-muted-foreground font-medium dynamic-diagnosis leading-relaxed">
+                          👉 {deficiency.description}
                         </p>
                       </CardContent>
                     </Card>
@@ -329,7 +339,7 @@ const Index = () => {
             </Card>
 
             <div className="flex gap-4">
-              <Button onClick={reset} className="flex-1">
+              <Button onClick={reset} className="w-full">
                 New Analysis
               </Button>
             </div>
@@ -337,16 +347,13 @@ const Index = () => {
             <Card className="bg-secondary/50">
               <CardContent className="pt-6">
                 <p className="text-sm text-muted-foreground">
-                  <strong>Disclaimer:</strong> This tool provides preliminary insights based on visual analysis
-                  and should not replace professional medical diagnosis. Please consult a healthcare provider
-                  for accurate diagnosis and treatment.
+                  <strong>Disclaimer:</strong> This tool provides preliminary insights based on visual analysis and should not replace professional medical diagnosis. Please consult a healthcare provider for accurate diagnosis and treatment.
                 </p>
               </CardContent>
             </Card>
           </div>
         )}
 
-        {/* How It Works */}
         {!selectedPart && !result && (
           <Card className="max-w-4xl mx-auto mt-12">
             <CardHeader>
